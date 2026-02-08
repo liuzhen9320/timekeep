@@ -5,11 +5,11 @@ import (
 	"log"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/jms-guy/timekeep/internal/database"
 	"github.com/jms-guy/timekeep/internal/repository"
+	"golang.org/x/sys/windows"
 )
 
 type Tracked struct {
@@ -211,16 +211,16 @@ func (sm *SessionManager) ValidateActiveSessions(ctx context.Context, logger *lo
 func isProcessRunning(pid int) bool {
 	// On Windows, use OpenProcess to check if the process exists
 	// This is more reliable than Signal(0)
-	handle, err := syscall.OpenProcess(syscall.PROCESS_QUERY_INFORMATION, false, uint32(pid))
+	handle, err := windows.OpenProcess(windows.PROCESS_QUERY_INFORMATION, false, uint32(pid))
 	if err != nil {
 		// Process doesn't exist or can't be opened
 		return false
 	}
-	defer syscall.CloseHandle(handle)
+	defer windows.CloseHandle(handle)
 
 	// Check if process has exited using GetExitCodeProcess
 	var exitCode uint32
-	err = syscall.GetExitCodeProcess(handle, &exitCode)
+	err = windows.GetExitCodeProcess(handle, &exitCode)
 	if err != nil {
 		// Error getting exit code means process is gone
 		return false
