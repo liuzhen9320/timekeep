@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 )
 
 // Linux specific service management functions
@@ -84,10 +85,29 @@ func (s *timekeepService) Manage() (string, error) {
 
 	go s.transport.Listen(serviceCtx, s.logger.Logger, s.eventCtrl, s.sessions, s.prRepo, s.asRepo, s.hsRepo)
 
+	// Start periodic validation of active sessions to clean up stale entries
+	go s.startSessionValidator(serviceCtx)
+
 	<-serviceCtx.Done()
 
 	s.logger.Logger.Println("INFO: Received shutdown signal")
 	s.closeService(s.logger.Logger)
 
 	return "INFO: Daemon stopped.", nil
+}
+
+// Periodically validates active sessions and cleans up stale entries where processes no longer exist
+func (s *timekeepService) startSessionValidator(ctx context.Context) {
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			s.logger.Logger.Println("INFO: Session validator stopped")
+			return
+		case <-ticker.C:
+			s.sessions.ValidateActiveSessions(ctx, s.logger.Logger, s.prRepo, s.asRepo, s.hsRepo)
+		}
+	}
 }

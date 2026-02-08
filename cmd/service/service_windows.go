@@ -128,7 +128,7 @@ loop:
 
 // Periodically validates active sessions and cleans up stale entries where processes no longer exist
 func (s *timekeepService) startSessionValidator(ctx context.Context) {
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(60 * time.Second)
 	defer ticker.Stop()
 
 	for {

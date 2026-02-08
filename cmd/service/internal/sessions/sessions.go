@@ -119,6 +119,10 @@ func (sm *SessionManager) EndSession(ctx context.Context, logger *log.Logger, pr
 
 	if len(t.PIDs) == 0 {
 		sm.MoveSessionToHistory(ctx, logger, pr, a, h, processName)
+		// Remove from Programs map to allow fresh session creation
+		sm.Mu.Lock()
+		delete(sm.Programs, processName)
+		sm.Mu.Unlock()
 	}
 }
 
@@ -161,10 +165,10 @@ func (sm *SessionManager) MoveSessionToHistory(ctx context.Context, logger *log.
 }
 
 // ValidateActiveSessions checks if tracked PIDs are still running and cleans up stale sessions
-// This is called periodically to handle cases where process_stop events are missed on Windows
+// This is called periodically to handle cases where process_stop events are missed
 func (sm *SessionManager) ValidateActiveSessions(ctx context.Context, logger *log.Logger, pr repository.ProgramRepository, a repository.ActiveRepository, h repository.HistoryRepository) {
 	sm.Mu.Lock()
-	defer sm.Mu.Unlock()
+	programsToClean := []string{}
 
 	for programName, tracked := range sm.Programs {
 		if tracked == nil || len(tracked.PIDs) == 0 {
@@ -180,16 +184,21 @@ func (sm *SessionManager) ValidateActiveSessions(ctx context.Context, logger *lo
 			}
 		}
 
-		// If all PIDs are gone, move session to history
+		// If all PIDs are gone, mark for cleanup
 		if allPIDsGone {
 			logger.Printf("INFO: ValidateActiveSessions detected all PIDs gone for %s, cleaning up", programName)
-			// Unlock before calling MoveSessionToHistory to avoid deadlock
-			sm.Mu.Unlock()
-			sm.MoveSessionToHistory(ctx, logger, pr, a, h, programName)
-			sm.Mu.Lock()
-			// Clear the PIDs map after moving to history
-			tracked.PIDs = make(map[int]struct{})
+			programsToClean = append(programsToClean, programName)
 		}
+	}
+	sm.Mu.Unlock()
+
+	// Process cleanup outside of lock to avoid deadlock
+	for _, programName := range programsToClean {
+		sm.MoveSessionToHistory(ctx, logger, pr, a, h, programName)
+		// Remove from Programs map to allow fresh session creation
+		sm.Mu.Lock()
+		delete(sm.Programs, programName)
+		sm.Mu.Unlock()
 	}
 }
 
