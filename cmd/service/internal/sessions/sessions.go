@@ -3,8 +3,10 @@ package sessions
 import (
 	"context"
 	"log"
+	"os"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/jms-guy/timekeep/internal/database"
@@ -156,4 +158,54 @@ func (sm *SessionManager) MoveSessionToHistory(ctx context.Context, logger *log.
 	}
 
 	logger.Printf("INFO: Moved session for %s to history (duration: %d seconds)", processName, duration)
+}
+
+// ValidateActiveSessions checks if tracked PIDs are still running and cleans up stale sessions
+// This is called periodically to handle cases where process_stop events are missed on Windows
+func (sm *SessionManager) ValidateActiveSessions(ctx context.Context, logger *log.Logger, pr repository.ProgramRepository, a repository.ActiveRepository, h repository.HistoryRepository) {
+	sm.Mu.Lock()
+	defer sm.Mu.Unlock()
+
+	for programName, tracked := range sm.Programs {
+		if tracked == nil || len(tracked.PIDs) == 0 {
+			continue
+		}
+
+		// Check if any PIDs are still running
+		allPIDsGone := true
+		for pid := range tracked.PIDs {
+			if isProcessRunning(pid) {
+				allPIDsGone = false
+				break
+			}
+		}
+
+		// If all PIDs are gone, move session to history
+		if allPIDsGone {
+			logger.Printf("INFO: ValidateActiveSessions detected all PIDs gone for %s, cleaning up", programName)
+			// Unlock before calling MoveSessionToHistory to avoid deadlock
+			sm.Mu.Unlock()
+			sm.MoveSessionToHistory(ctx, logger, pr, a, h, programName)
+			sm.Mu.Lock()
+			// Clear the PIDs map after moving to history
+			tracked.PIDs = make(map[int]struct{})
+		}
+	}
+}
+
+// isProcessRunning checks if a process with the given PID is still running on Windows
+func isProcessRunning(pid int) bool {
+	// Try to open the process handle - if it succeeds, the process is running
+	// On Windows, we can use os.FindProcess which doesn't actually verify the process exists
+	// So we need a more robust check
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	defer proc.Release()
+
+	// On Windows, we can send signal 0 to check if process exists
+	// If it returns nil, process is running; if it returns error, process is gone
+	err = proc.Signal(syscall.Signal(0))
+	return err == nil
 }

@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"time"
 
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/debug"
@@ -80,6 +81,9 @@ func (s *timekeepService) Execute(args []string, r <-chan svc.ChangeRequest, sta
 
 	go s.transport.Listen(serviceCtx, s.logger.Logger, s.eventCtrl, s.sessions, s.prRepo, s.asRepo, s.hsRepo)
 
+	// Start periodic validation of active sessions to clean up stale entries
+	go s.startSessionValidator(serviceCtx)
+
 	status <- svc.Status{State: svc.Running, Accepts: cmdsAccepted}
 
 	// Service mainloop, handles only SCM signals
@@ -120,4 +124,20 @@ loop:
 	}
 
 	return false, 0
+}
+
+// Periodically validates active sessions and cleans up stale entries where processes no longer exist
+func (s *timekeepService) startSessionValidator(ctx context.Context) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			s.logger.Logger.Println("INFO: Session validator stopped")
+			return
+		case <-ticker.C:
+			s.sessions.ValidateActiveSessions(ctx, s.logger.Logger, s.prRepo, s.asRepo, s.hsRepo)
+		}
+	}
 }

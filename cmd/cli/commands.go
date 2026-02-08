@@ -333,6 +333,16 @@ func (s *CLIService) GetActiveSessions(ctx context.Context) error {
 	return nil
 }
 
+// Clears all active sessions and resets the count
+func (s *CLIService) CleanActiveSessions(ctx context.Context) error {
+	err := s.AsRepo.RemoveAllSessions(ctx)
+	if err != nil {
+		return fmt.Errorf("error removing all active sessions: %w", err)
+	}
+	fmt.Println("All active sessions cleared successfully")
+	return nil
+}
+
 // Basic function to print the current Timekeep version
 func (s *CLIService) GetVersion() error {
 	fmt.Println(s.Version)

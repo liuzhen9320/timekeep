@@ -202,7 +202,7 @@ func (s *CLIService) statusServiceCmd() *cobra.Command {
 }
 
 func (s *CLIService) getActiveSessionsCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:     "active",
 		Aliases: []string{"Active", "ACTIVE"},
 		Short:   "Get list of current active sessions being tracked",
@@ -210,9 +210,18 @@ func (s *CLIService) getActiveSessionsCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 
+			clean, _ := cmd.Flags().GetBool("clean")
+			if clean {
+				return s.CleanActiveSessions(ctx)
+			}
+
 			return s.GetActiveSessions(ctx)
 		},
 	}
+
+	cmd.Flags().Bool("clean", false, "Clear all active sessions and reset the count")
+
+	return cmd
 }
 
 func (s *CLIService) getVersionCmd() *cobra.Command {
