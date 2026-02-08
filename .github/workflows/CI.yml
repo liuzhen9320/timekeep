@@ -3,8 +3,71 @@ name: CI
 on:
   pull_request:
     branches: [main]
+  push:
+    branches: [main]
 
 jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Build binaries
+        run: |
+          # Service binaries
+          GOOS=windows go build -ldflags "-X github.com/jms-guy/timekeep/cmd/service/internal/events.Version=${{ github.sha }}" -o timekeep-service.exe ./cmd/service
+          GOOS=linux go build -ldflags "-X github.com/jms-guy/timekeep/cmd/service/internal/events.Version=${{ github.sha }}" -o timekeepd ./cmd/service 
+          
+          # CLI binaries
+          GOOS=windows go build -ldflags "-X main.Version=${{ github.sha }}" -o timekeep.exe ./cmd/cli
+          GOOS=linux go build -ldflags "-X main.Version=${{ github.sha }}" -o timekeep ./cmd/cli
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p timekeep-release/windows timekeep-release/linux
+          
+          # Copy install scripts
+          cp scripts/install.ps1 timekeep-release/
+          cp scripts/install.bat timekeep-release/
+          cp scripts/install.sh timekeep-release/
+          
+          # Copy Windows binaries
+          cp timekeep-service.exe timekeep-release/windows/
+          cp timekeep.exe timekeep-release/windows/
+          
+          # Copy Linux binaries
+          cp timekeepd timekeep-release/linux/
+          cp timekeep timekeep-release/linux/
+
+          cat > timekeep-release/README.txt << 'EOF'
+          TimeKeep Installation
+          ======================
+          
+          1. Extract this ZIP file
+          2. Run the appropriate install script:
+             - Windows: Right-click install.ps1 - "Run with PowerShell" as Administrator
+             - Linux: chmod +x install.sh && sudo ./install.sh
+          
+          The install script will handle everything automatically.
+          EOF
+          
+          zip -r timekeep-${{ github.sha }}.zip timekeep-release/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: timekeep-${{ github.sha }}
+          path: timekeep-${{ github.sha }}.zip
+          retention-days: 30
+
   tests:
     name: Tests 
     runs-on: ubuntu-latest
