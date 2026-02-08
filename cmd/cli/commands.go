@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/jms-guy/timekeep/internal/database"
 )
 
@@ -487,4 +488,221 @@ func (s *CLIService) StatusWakapi() error {
 	}
 
 	return nil
+}
+
+// Display comprehensive statistics about the system
+func (s *CLIService) GetStats(ctx context.Context) error {
+	// Define color styles
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#FAFAFA")).
+		Background(lipgloss.Color("#7D56F4"))
+
+	sectionTitleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#FF9500"))
+
+	programNameStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#38B6FF"))
+
+	categoryStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#FFD700"))
+
+	projectStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#FF6B9D"))
+
+	lifetimeStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#00FF88"))
+
+	recentSessionsStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#A78BFA"))
+
+	sessionTimeStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#808080"))
+
+	sessionDurationStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#FFFFFF"))
+
+	enabledStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#00FF00"))
+
+	disabledStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#FF0000"))
+
+	// Title
+	fmt.Println(titleStyle.Render("TIMEKEEP STATISTICS REPORT"))
+	fmt.Println()
+
+	// Service Status
+	fmt.Println(sectionTitleStyle.Render("🔌 SERVICE STATUS"))
+	if err := s.getServiceStatusString(nil); err != nil {
+		fmt.Printf("  ⚠️  %v\n", err)
+	}
+	fmt.Println()
+
+	// Active Sessions
+	fmt.Println(sectionTitleStyle.Render("🔄 ACTIVE SESSIONS"))
+	activeSessions, err := s.AsRepo.GetAllActiveSessions(ctx)
+	if err != nil {
+		fmt.Printf("  Error getting active sessions: %v\n", err)
+	} else if len(activeSessions) == 0 {
+		fmt.Println("  (none)")
+	} else {
+		for _, session := range activeSessions {
+			duration := time.Since(session.StartTime)
+			fmt.Printf("  • %s - ", programNameStyle.Render(session.ProgramName))
+			s.formatDurationToString(nil, duration)
+		}
+	}
+	fmt.Println()
+
+	// Tracked Programs
+	fmt.Println(sectionTitleStyle.Render("📋 TRACKED PROGRAMS"))
+	programs, err := s.PrRepo.GetAllPrograms(ctx)
+	if err != nil {
+		fmt.Printf("  Error getting programs: %v\n", err)
+	} else if len(programs) == 0 {
+		fmt.Println("  (none)")
+	} else {
+		for _, program := range programs {
+			duration := time.Duration(program.LifetimeSeconds) * time.Second
+			fmt.Printf("  └─ %s\n", programNameStyle.Render(program.Name))
+
+			// Category
+			if program.Category.Valid && program.Category.String != "" {
+				fmt.Printf("      └─ %s: %s\n", categoryStyle.Render("Category"), program.Category.String)
+			}
+
+			// Project
+			if program.Project.Valid && program.Project.String != "" {
+				fmt.Printf("      └─ %s: %s\n", projectStyle.Render("Project"), program.Project.String)
+			}
+
+			// Lifetime info
+			fmt.Print("      └─ ")
+			fmt.Print(lifetimeStyle.Render("Lifetime"))
+			fmt.Print(": ")
+			if duration < time.Minute {
+				fmt.Printf("%d seconds\n", int(duration.Seconds()))
+			} else if duration < time.Hour {
+				fmt.Printf("%d minutes\n", int(duration.Minutes()))
+			} else {
+				hours := int(duration.Hours())
+				minutes := int(duration.Minutes()) % 60
+				fmt.Printf("%dh %dm\n", hours, minutes)
+			}
+
+			// Get recent history for this program
+			history, err := s.HsRepo.GetSessionHistory(ctx, database.GetSessionHistoryParams{
+				ProgramName: program.Name,
+				Limit:       3,
+			})
+			if err == nil && len(history) > 0 {
+				fmt.Print("      └─ ")
+				fmt.Println(recentSessionsStyle.Render("Recent Sessions"))
+				for j, session := range history {
+					isLastHistory := j == len(history)-1
+					historyPrefix := "          ├─ "
+					if isLastHistory {
+						historyPrefix = "          └─ "
+					}
+
+					sessionDuration := time.Duration(session.DurationSeconds) * time.Second
+					fmt.Printf("%s%s - %s ", historyPrefix,
+						sessionTimeStyle.Render(session.StartTime.Format("2006-01-02 15:04")),
+						sessionTimeStyle.Render(session.EndTime.Format("15:04")))
+
+					if sessionDuration < time.Minute {
+						fmt.Printf("%s\n", sessionDurationStyle.Render(fmt.Sprintf("(%d seconds)", int(sessionDuration.Seconds()))))
+					} else if sessionDuration < time.Hour {
+						fmt.Printf("%s\n", sessionDurationStyle.Render(fmt.Sprintf("(%d minutes)", int(sessionDuration.Minutes()))))
+					} else {
+						hours := int(sessionDuration.Hours())
+						minutes := int(sessionDuration.Minutes()) % 60
+						fmt.Printf("%s\n", sessionDurationStyle.Render(fmt.Sprintf("(%dh %dm)", hours, minutes)))
+					}
+				}
+			}
+		}
+	}
+	fmt.Println()
+
+	// WakaTime Status
+	fmt.Println(sectionTitleStyle.Render("⏱️  WAKATIME INTEGRATION"))
+	if s.Config.WakaTime.Enabled {
+		fmt.Printf("  Status: %s\n", enabledStyle.Render("ENABLED"))
+		if s.Config.WakaTime.CLIPath != "" {
+			fmt.Printf("  CLI Path: %s\n", s.Config.WakaTime.CLIPath)
+		}
+		if s.Config.WakaTime.GlobalProject != "" {
+			fmt.Printf("  Global Project: %s\n", s.Config.WakaTime.GlobalProject)
+		}
+	} else {
+		fmt.Printf("  Status: %s\n", disabledStyle.Render("DISABLED"))
+	}
+	fmt.Println()
+
+	// Wakapi Status
+	fmt.Println(sectionTitleStyle.Render("🌐 WAKAPI INTEGRATION"))
+	if s.Config.Wakapi.Enabled {
+		fmt.Printf("  Status: %s\n", enabledStyle.Render("ENABLED"))
+		if s.Config.Wakapi.Server != "" {
+			fmt.Printf("  Server: %s\n", s.Config.Wakapi.Server)
+		}
+		if s.Config.Wakapi.GlobalProject != "" {
+			fmt.Printf("  Global Project: %s\n", s.Config.Wakapi.GlobalProject)
+		}
+	} else {
+		fmt.Printf("  Status: %s\n", disabledStyle.Render("DISABLED"))
+	}
+	fmt.Println()
+
+	return nil
+}
+
+// Helper function to get service status as string instead of printing
+func (s *CLIService) getServiceStatusString(sb *strings.Builder) error {
+	status, err := s.GetServiceStatusString()
+	if err != nil {
+		return err
+	}
+	if sb != nil {
+		sb.WriteString(fmt.Sprintf("  Status: %s\n", status))
+	} else {
+		fmt.Printf("  Status: %s\n", status)
+	}
+	return nil
+}
+
+// Helper function to format duration to string
+func (s *CLIService) formatDurationToString(sb *strings.Builder, duration time.Duration) {
+	if duration < time.Minute {
+		if sb != nil {
+			sb.WriteString(fmt.Sprintf("%d seconds\n", int(duration.Seconds())))
+		} else {
+			fmt.Printf("%d seconds\n", int(duration.Seconds()))
+		}
+	} else if duration < time.Hour {
+		if sb != nil {
+			sb.WriteString(fmt.Sprintf("%d minutes\n", int(duration.Minutes())))
+		} else {
+			fmt.Printf("%d minutes\n", int(duration.Minutes()))
+		}
+	} else {
+		hours := int(duration.Hours())
+		minutes := int(duration.Minutes()) % 60
+		if sb != nil {
+			sb.WriteString(fmt.Sprintf("%dh %dm\n", hours, minutes))
+		} else {
+			fmt.Printf("%dh %dm\n", hours, minutes)
+		}
+	}
 }

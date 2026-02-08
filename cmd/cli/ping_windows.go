@@ -65,10 +65,48 @@ func (s *CLIService) StatusService() error {
 	}
 
 	if state, ok := stateName[ServiceState(stateNum)]; ok {
-		fmt.Printf("Service status: %s\n", state)
+		fmt.Printf("  Status: %s\n", state)
 	} else {
-		fmt.Printf("Service status: Unknown state (%d)\n", stateNum)
+		fmt.Printf("  Status: Unknown state (%d)\n", stateNum)
 	}
 
 	return nil
+}
+
+// GetServiceStatusString returns the service status as a string
+func (s *CLIService) GetServiceStatusString() (string, error) {
+	stdoutResult, err := s.CmdExe.RunCommand(context.Background(), "sc.exe", "query", "Timekeep")
+	if err != nil {
+		return "", err
+	}
+
+	stdoutLines := strings.Split(stdoutResult, "\n")
+
+	stateStr := ""
+	for _, line := range stdoutLines {
+		trimmedLine := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmedLine, "STATE") {
+			stateStr = line
+			break
+		}
+	}
+	if stateStr == "" {
+		return "", fmt.Errorf("missing service state value")
+	}
+
+	parts := strings.Fields(stateStr)
+	if len(parts) < 3 {
+		return "", fmt.Errorf("malformed state line: %s", stateStr)
+	}
+
+	stateValStr := parts[2]
+	stateNum, err := strconv.Atoi(stateValStr)
+	if err != nil {
+		return "", fmt.Errorf("error converting state number '%s' to integer: %w", stateValStr, err)
+	}
+
+	if state, ok := stateName[ServiceState(stateNum)]; ok {
+		return state, nil
+	}
+	return fmt.Sprintf("Unknown state (%d)", stateNum), nil
 }

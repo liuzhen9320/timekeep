@@ -364,3 +364,17 @@ func (s *CLIService) setConfigCmd() *cobra.Command {
 
 	return cmd
 }
+
+func (s *CLIService) statsCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:     "stats",
+		Aliases: []string{"statistics", "STATS"},
+		Short:   "Display comprehensive statistics",
+		Long:    "Shows service status, active sessions, tracked programs, and integration status",
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+			return s.GetStats(ctx)
+		},
+	}
+}

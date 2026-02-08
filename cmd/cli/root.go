@@ -15,7 +15,11 @@ func (s *CLIService) RootCmd() *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:   "timekeep",
 		Short: "Timekeep is a process activity tracker",
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return s.GetStats(cmd.Context())
+			}
+			return nil
 		},
 	}
 
@@ -43,6 +47,7 @@ func (s *CLIService) RootCmd() *cobra.Command {
 	rootCmd.AddCommand(s.getActiveSessionsCmd())
 	rootCmd.AddCommand(s.getVersionCmd())
 	rootCmd.AddCommand(s.setConfigCmd())
+	rootCmd.AddCommand(s.statsCmd())
 
 	rootCmd.AddCommand(CompletionCmd)
 
