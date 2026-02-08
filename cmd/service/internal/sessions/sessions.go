@@ -3,7 +3,6 @@ package sessions
 import (
 	"context"
 	"log"
-	"os"
 	"strings"
 	"sync"
 	"syscall"
@@ -169,6 +168,7 @@ func (sm *SessionManager) MoveSessionToHistory(ctx context.Context, logger *log.
 func (sm *SessionManager) ValidateActiveSessions(ctx context.Context, logger *log.Logger, pr repository.ProgramRepository, a repository.ActiveRepository, h repository.HistoryRepository) {
 	sm.Mu.Lock()
 	programsToClean := []string{}
+	gracePeriod := 120 * time.Second // Give 2 minutes grace period before cleaning up
 
 	for programName, tracked := range sm.Programs {
 		if tracked == nil || len(tracked.PIDs) == 0 {
@@ -184,10 +184,15 @@ func (sm *SessionManager) ValidateActiveSessions(ctx context.Context, logger *lo
 			}
 		}
 
-		// If all PIDs are gone, mark for cleanup
+		// If all PIDs are gone and grace period has passed, mark for cleanup
 		if allPIDsGone {
-			logger.Printf("INFO: ValidateActiveSessions detected all PIDs gone for %s, cleaning up", programName)
-			programsToClean = append(programsToClean, programName)
+			timeSinceLastSeen := time.Since(tracked.LastSeen)
+			if timeSinceLastSeen > gracePeriod {
+				logger.Printf("INFO: ValidateActiveSessions detected all PIDs gone for %s (last seen %v ago), cleaning up", programName, timeSinceLastSeen)
+				programsToClean = append(programsToClean, programName)
+			} else {
+				logger.Printf("INFO: ValidateActiveSessions detected all PIDs gone for %s, but within grace period (%v/%v)", programName, timeSinceLastSeen, gracePeriod)
+			}
 		}
 	}
 	sm.Mu.Unlock()
@@ -204,17 +209,24 @@ func (sm *SessionManager) ValidateActiveSessions(ctx context.Context, logger *lo
 
 // isProcessRunning checks if a process with the given PID is still running on Windows
 func isProcessRunning(pid int) bool {
-	// Try to open the process handle - if it succeeds, the process is running
-	// On Windows, we can use os.FindProcess which doesn't actually verify the process exists
-	// So we need a more robust check
-	proc, err := os.FindProcess(pid)
+	// On Windows, use OpenProcess to check if the process exists
+	// This is more reliable than Signal(0)
+	handle, err := syscall.OpenProcess(syscall.PROCESS_QUERY_INFORMATION, false, uint32(pid))
 	if err != nil {
+		// Process doesn't exist or can't be opened
 		return false
 	}
-	defer proc.Release()
+	defer syscall.CloseHandle(handle)
 
-	// On Windows, we can send signal 0 to check if process exists
-	// If it returns nil, process is running; if it returns error, process is gone
-	err = proc.Signal(syscall.Signal(0))
-	return err == nil
+	// Check if process has exited using GetExitCodeProcess
+	var exitCode uint32
+	err = syscall.GetExitCodeProcess(handle, &exitCode)
+	if err != nil {
+		// Error getting exit code means process is gone
+		return false
+	}
+
+	// If exit code is STILL_ACTIVE (259), process is still running
+	// Otherwise it has exited
+	return exitCode == 259
 }
